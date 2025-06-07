@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Copyright (C) 2023 Yeh, Hsin-Hsien <yhh76227@gmail.com>
+#
+import re
+import sys
+from remote_sync.remote_bisync import main
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(main())
+
+

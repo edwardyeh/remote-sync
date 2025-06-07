@@ -1,0 +1,37 @@
+{
+    "client": "edward-sf",
+    "remote": "asgard-smb",
+    "retry_connect_times": 5,
+    "retry_connect_interval": 60,
+    "retry_lock_times": 15,
+    "retry_lock_interval": 60,
+    "retry_lock_randtime": 30,
+    "log_directory": "C:/Users/Edward/.rclone_log",
+    "email_send": true,
+    "receiver_mail": "receiver@gmail.com",
+    "smtp_user": "sender@gmail.com",
+    "smtp_pass": "password",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 465,
+    "sync_directory": {
+        "database": {
+            "remote": "Database",
+            "client": "C:/Users/Edward/Database",
+            "exclude": ["VirtureSystem/**"]
+        },
+        "office": {
+            "remote": "Office",
+            "client": "C:/Users/Edward/Office",
+            "exclude": [
+                "90_Backup/Joplin/**",
+                "90_Backup/Joplin-NB/**"
+            ]
+        },
+        "workspace": {            
+            "remote": "Workspace",
+            "client": "C:/Users/Edward/Workspace",
+            "exclude": []
+        }
+    }
+}
+

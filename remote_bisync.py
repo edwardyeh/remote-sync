@@ -193,6 +193,7 @@ def remote_bisync(args, config: dict):
                "--conflict-resolve", "newer",
                "--conflict-suffix", f"conflict_{remote_srv},conflict_{client_srv}",
                "--force", 
+               "--create-empty-src-dirs",
                "--exclude", f"{client_srv}.rclock"]
 
         for exclude_path in exclude_list:

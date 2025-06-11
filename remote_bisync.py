@@ -98,6 +98,11 @@ def remote_bisync(args, config: dict):
     else:
         pout = sys.stdout
 
+    if args.sync:
+        sync_flow = "SYNC-FLOW"
+    else:
+        sync_flow = "BISYNC-FLOW"
+
     # Remote connect check
     client_srv = config["client"]
     remote_srv = config["remote"]
@@ -106,8 +111,8 @@ def remote_bisync(args, config: dict):
     connect_pass = False
     retry_times = 0
 
-    print("{} BISYNC-FLOW: Connect to the remote server \"{}\"".format(
-            timestamp(), remote_srv), file=pout)
+    print("{} {}: Connect to the remote server \"{}\"".format(timestamp(), 
+          sync_flow, remote_srv), file=pout)
 
     while not connect_pass:
 
@@ -118,16 +123,16 @@ def remote_bisync(args, config: dict):
                                  "--fast-list"], capture_output=True, text=True)
 
         if result.returncode == 0:
-            print("{} BISYNC-FLOW: \"{}\" connect pass".format(
-                    timestamp(), remote_srv), file=pout)
+            print("{} {}: \"{}\" connect pass".format(timestamp(), sync_flow, 
+                  remote_srv), file=pout)
             connect_pass = True
         elif retry_times == retry_limit:
-            print(f"{timestamp()} BISYNC-FLOW: " + 
+            print(f"{timestamp()} {sync_flow}: " + 
                   f"The number of connection retry attempts has reached " + 
                   f"the configured limit, terminate. ({remote_srv})", file=pout)
             exit(1)
         else:
-            print(f"{timestamp()} BISYNC-FLOW: " + 
+            print(f"{timestamp()} {sync_flow}: " + 
                   f"\"{remote_srv}\" connect fail, retry. " + 
                   f"({retry_times}/{retry_limit})", file=pout)
             time.sleep(retry_inter)
@@ -154,29 +159,31 @@ def remote_bisync(args, config: dict):
         retry_rand = config["retry_lock_randtime"]
         retry_times = 0
 
-        print("{} BISYNC-FLOW: Lock remote directory \"{}\"".format(
-                timestamp(), remote_path), file=pout)
+        print("{} {}: Lock remote directory \"{}\"".format(timestamp(), 
+              sync_flow, remote_path), file=pout)
 
         while not (lock_pass or lock_fail):
 
-            result = subprocess.run(["rclone", "ls", remote_path,
-                                     "--max-depth", "1",
-                                     "--include", "*.rclock"],
-                                    capture_output=True, text=True)
+            cmd = ["rclone", "ls", remote_path, "--max-depth", "1",
+                   "--filter", f"- {client_srv}.rclock",
+                   "--filter", f"+ *.rclock",
+                   "--filter", f"- *"]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.stdout == "":
                 subprocess.run(["rclone", "touch", lock_path])
-                print("{} BISYNC-FLOW: \"{}\" lock pass".format(
-                        timestamp(), remote_path), file=pout)
+                print("{} {}: \"{}\" lock pass".format(timestamp(), sync_flow, 
+                      remote_path), file=pout)
                 lock_pass = True
             elif retry_times == retry_limit:
-                print(f"{timestamp()} BISYNC-FLOW: " + 
+                print(f"{timestamp()} {sync_flow}: " + 
                       f"The number of lock retry attempts has reached " + 
                       f"the configured limit, ignore. ({remote_path})", 
                       file=pout)
                 lock_fail = True
             else:
-                print(f"{timestamp()} BISYNC-FLOW: " + 
+                print(f"{timestamp()} {sync_flow}: " + 
                       f"\"{remote_path}\" lock fail, retry. " + 
                       f"({retry_times}/{retry_limit})", file=pout)
                 time.sleep(retry_inter + random.randint(0, retry_rand))
@@ -186,29 +193,52 @@ def remote_bisync(args, config: dict):
             continue
 
         # Sync remote data
-        cmd = ["rclone", "bisync", remote_path, client_path,
-               "-vv", 
-               "--log-file={}".format(logfile),
-               "--checksum",
-               "--conflict-resolve", "newer",
-               "--conflict-suffix", f"conflict_{remote_srv},conflict_{client_srv}",
-               "--force", 
-               "--create-empty-src-dirs",
-               "--exclude", f"{client_srv}.rclock"]
+        sync_mode = ""
 
-        for exclude_path in exclude_list:
-            cmd.extend(["--exclude", exclude_path])
+        if args.sync:
+            cmd = ["rclone", "sync"]
+        else:
+            cmd = ["rclone", "bisync"]
 
         if args.resync:
             cmd.append("--resync")
-            print("{} BISYNC-FLOW: Start bisync \"{}\" (resync)".format(
-                    timestamp(), remote_path), file=pout)
+            sync_mode += ", resync"
+
+        if args.reverse:
+            if args.sync:
+                cmd.extend([client_path, remote_path])
+                sync_mode += ", reverse"
+            else:
+                cmd.extend([remote_path, client_path])
+                print("{} {}: Ignore option \"-reverse\"".format(
+                      timestamp(), sync_flow), file=pout)
         else:
-            print("{} BISYNC-FLOW: Start bisync \"{}\" ".format(
-                    timestamp(), remote_path), file=pout)
+            cmd.extend([remote_path, client_path])
 
         if args.dryrun:
             cmd.append("--dry-run")
+
+        if not args.sync:
+            cmd.extend([
+                "--conflict-resolve", "newer",
+                "--conflict-suffix", f"conflict_{remote_srv},conflict_{client_srv}",
+                "--force"
+            ])
+
+        cmd.extend([
+            "-vv", f"--log-file={logfile}", "--checksum",
+            "--create-empty-src-dirs",
+            "--exclude", f"{client_srv}.rclock",
+        ])
+        
+        for exclude_path in exclude_list:
+            cmd.extend(["--exclude", exclude_path])
+
+        if sync_mode != "":
+            sync_mode = f"({sync_mode[2:]})"
+
+        print("{} {}: Start sync \"{}\" {}".format(timestamp(), sync_flow, 
+              remote_path, sync_mode), file=pout)
 
         if args.print_to_log:
             pout.close()
@@ -228,17 +258,18 @@ def remote_bisync(args, config: dict):
                         break
 
         if conflict_found:
-            print("{} BISYNC-FLOW: Conflict detected when sync \"{}\" ".format(
-                    timestamp(), remote_path), file=pout)
+            print("{} {}: Conflict detected when sync \"{}\" ".format(
+                    timestamp(), sync_flow, remote_path), file=pout)
 
             msg = MIMEMultipart()
             msg["From"] = (smtp_user := config["smtp_user"])
             msg["To"] = (receiver_mail := config["receiver_mail"])
-            msg["Subject"] = f"[{client_srv}] Rclone Bisync Flow Conflict"
+            msg["Subject"] = f"[{client_srv}] Rclone Sync Conflict"
 
             msg_body = "Sync conflict occurred.\n" + \
                        "Please log in to the system and check the log file " + \
                        "for manual resolution.\n\n" + \
+                       "Sync Mode   : {}\n".format(sync_flow) + \
                        "Remote Path : {}\n".format(remote_path) + \
                        "Client Path : {}\n".format(client_path) + \
                        "Log File    : {}\n".format(logfile.absolute())
@@ -251,15 +282,15 @@ def remote_bisync(args, config: dict):
                 with smtplib.SMTP_SSL(smtp_srv, smtp_port) as server:
                     server.login(smtp_user, smtp_pass)
                     server.sendmail(smtp_user, receiver_mail, msg.as_string())
-                print(f"{timestamp()} BISYNC-FLOW: " + 
+                print(f"{timestamp()} {sync_flow}: " + 
                       f"Conflict email sent successfully.", file=pout)
             except Exception as e:
                 print(f"Error: {e}")
 
         # Remove lock
         subprocess.run(["rclone", "delete", lock_path])
-        print("{} BISYNC-FLOW: \"{}\" lock is removed".format(
-                timestamp(), remote_path), file=pout)
+        print("{} {}: \"{}\" lock is removed".format(timestamp(), sync_flow, 
+              remote_path), file=pout)
 
     if args.print_to_log:
         pout.close()
@@ -272,10 +303,17 @@ def create_argparse() -> argparse.ArgumentParser:
         description='Remote File Sync Tool base on Rclone.')
 
     parser.add_argument("json_file", help="Sync setting by JSON.") 
-    parser.add_argument("-resync", dest="resync", action="store_true", 
-                        help="Resync mode.")
     parser.add_argument("-print_to_log", dest="print_to_log", action="store_true", 
                         help="Print the flow log to the rclone log file.")
+
+    sync_gparser = parser.add_mutually_exclusive_group(required=False)
+    sync_gparser.add_argument("-sync", dest="sync", action="store_true", 
+                              help="Sync mode.")
+    sync_gparser.add_argument("-resync", dest="resync", action="store_true", 
+                              help="Resync mode.")
+
+    parser.add_argument("-reverse", dest="reverse", action="store_true", 
+                        help="Reverse the remote and client.")
     parser.add_argument("-dryrun", dest="dryrun", action="store_true", 
                         help="Do a trial run with no permanent changes.")
     parser.add_argument('-target', dest='targets', metavar='string', nargs='*', 

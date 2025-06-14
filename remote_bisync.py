@@ -15,6 +15,7 @@ import subprocess
 import smtplib
 import sys
 import time
+import zipfile
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from jsonschema import validate, ValidationError
@@ -82,6 +83,84 @@ def get_schema():
     }
 
     return schema
+
+
+def compress_single_file_to_zip(file_path, output_zip_path):
+    """
+    Compresses a single file into a ZIP archive.
+
+    Args:
+        file_path (str): The path to the file to be compressed.
+        output_zip_path (str): The path for the output ZIP archive.
+    """
+    try:
+        with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            zipf.write(file_path, os.path.basename(file_path))
+        os.remove(file_path)
+    except Exception as e:
+        # Ignore compress process
+        pass
+
+
+def clean_old_logs(log_directory, retention_days=30, suffix=".log"):
+    """
+    Removes log files (.log) from the specified directory that are older than
+    the given retention period.
+
+    Args:
+        log_directory (str): The path to the directory containing log files.
+        retention_days (int): The number of days to retain log files.
+                              Defaults to 30 days (approximately one month).
+    """
+    if not os.path.isdir(log_directory):
+        print(f"Error: Log directory '{log_directory}' does not exist or is not a valid directory.")
+        return
+
+    # Calculate the cutoff date for file retention.
+    # Files with a last modification date older than this will be deleted.
+    cutoff_date = datetime.datetime.now() - datetime.timedelta(days=retention_days)
+
+    # print(f"Starting to clean log files older than {retention_days} days in '{log_directory}'...")
+    # print(f"Cutoff date for deletion: {cutoff_date.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    deleted_count = 0
+    error_count = 0
+
+    # Iterate through all files and directories in the specified log directory
+    for filename in os.listdir(log_directory):
+        file_path = os.path.join(log_directory, filename)
+
+        # Check if the current item is a file and has a '.log' extension (case-insensitive)
+        if os.path.isfile(file_path) and filename.lower().endswith(suffix):
+            try:
+                # Get the last modification time of the file (Unix timestamp)
+                # os.path.getmtime() returns a float representing seconds since the epoch
+                modification_timestamp = os.path.getmtime(file_path)
+
+                # Convert the timestamp to a datetime object for easy comparison
+                modification_date = datetime.datetime.fromtimestamp(modification_timestamp)
+
+                # Compare the file's modification date with the calculated cutoff date
+                if modification_date < cutoff_date:
+                    # print(f"Deleting old log file: '{filename}' (Modified: {modification_date.strftime('%Y-%m-%d %H:%M:%S')})")
+                    os.remove(file_path)
+                    deleted_count += 1
+                else:
+                    # File is within the retention period, so it will be kept.
+                    # print(f"Retaining log file: '{filename}' (Modified: {modification_date.strftime('%Y-%m-%d %H:%M:%S')})")
+                    pass
+
+            except OSError as e:
+                # print(f"Could not process file '{filename}': {e}")
+                error_count += 1
+            except Exception as e:
+                # print(f"An unknown error occurred while processing file '{filename}': {e}")
+                error_count += 1
+
+    # print(f"\nCleaning complete!")
+    # print(f"Deleted {deleted_count} log files.")
+    # if error_count > 0:
+    #     print(f"Encountered {error_count} errors during processing.")
 
 
 def remote_bisync(args, config: dict):
@@ -294,6 +373,9 @@ def remote_bisync(args, config: dict):
 
     if args.print_to_log:
         pout.close()
+
+    compress_single_file_to_zip(logfile, logfile.parent / (logfile.stem + ".zip")) 
+    clean_old_logs(logfile.parent, retention_days=30, suffix=".zip")
 
 
 def create_argparse() -> argparse.ArgumentParser:

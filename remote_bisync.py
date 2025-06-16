@@ -366,6 +366,44 @@ def remote_bisync(args, config: dict):
             except Exception as e:
                 print(f"Error: {e}")
 
+        # Send error email
+        error_found = False
+        with open(logfile, "r", encoding="utf-8") as log_fp:
+            for line in log_fp:
+                if line.strip().startswith("Errors:"):
+                    error_found = True
+                    break
+
+        if error_found:
+            print("{} {}: Error detected when sync \"{}\" ".format(
+                    timestamp(), sync_flow, remote_path), file=pout)
+
+            msg = MIMEMultipart()
+            msg["From"] = (smtp_user := config["smtp_user"])
+            msg["To"] = (receiver_mail := config["receiver_mail"])
+            msg["Subject"] = f"[{client_srv}] Rclone Sync Error Occur"
+
+            msg_body = "Sync error occurred.\n" + \
+                       "Please log in to the system and check the log file " + \
+                       "for manual resolution.\n\n" + \
+                       "Sync Mode   : {}\n".format(sync_flow) + \
+                       "Remote Path : {}\n".format(remote_path) + \
+                       "Client Path : {}\n".format(client_path) + \
+                       "Log File    : {}\n".format(logfile.absolute())
+            msg.attach(MIMEText(msg_body, "plain"))
+
+            try:
+                smtp_srv = config["smtp_server"]
+                smtp_port = config["smtp_port"]
+                smtp_pass = config["smtp_pass"]
+                with smtplib.SMTP_SSL(smtp_srv, smtp_port) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.sendmail(smtp_user, receiver_mail, msg.as_string())
+                print(f"{timestamp()} {sync_flow}: " + 
+                      f"Error email sent successfully.", file=pout)
+            except Exception as e:
+                print(f"Error: {e}")
+
         # Remove lock
         subprocess.run(["rclone", "delete", lock_path])
         print("{} {}: \"{}\" lock is removed".format(timestamp(), sync_flow, 

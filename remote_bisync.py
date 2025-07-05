@@ -305,7 +305,7 @@ def remote_bisync(args, config: dict):
             ])
 
         cmd.extend([
-            "-vv", f"--log-file={logfile}", "--checksum",
+            "-vv", f"--log-file={logfile}",
             "--create-empty-src-dirs",
             "--exclude", f"{client_srv}.rclock",
         ])
